@@ -26,7 +26,6 @@ class NodeCreator extends StatelessWidget {
               case AppMode.settingWeights:
                 _handleSetWeight(context, tspProvider, offset);
                 break;
-              
             }
           },
           child: CustomPaint(

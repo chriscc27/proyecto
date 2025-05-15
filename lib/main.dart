@@ -1,35 +1,30 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+// lib/main.dart
 import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:provider/provider.dart';
+
 import 'package:proyecto/providers/tsp_provider.dart';
-import 'package:proyecto/widgets/node_creator.dart';
 import 'package:proyecto/models/node.dart';
 import 'package:proyecto/algorithms/genetic_tsp.dart';
-import 'package:proyecto/widgets/route_painter.dart'; // Asegúrate que el RoutePainter está aquí o importado
+
 
 void main() {
   runApp(
-    ChangeNotifierProvider(
-      create: (context) => TSPProvider(),
-      child: const MyApp(),
-    ),
+    ChangeNotifierProvider(create: (_) => TSPProvider(), child: const MyApp()),
   );
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'TSP Solver Genético',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-      ),
-      home: const HomeScreen(),
-    );
-  }
+  Widget build(BuildContext context) => MaterialApp(
+        title: 'TSP Solver Genético',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(primarySwatch: Colors.blue),
+        home: const HomeScreen(),
+      );
 }
 
 class HomeScreen extends StatefulWidget {
@@ -43,70 +38,60 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Node> fullRoute = [];
   double totalDistance = 0;
 
-  // Animación
-  bool isAnimating = false;
-  bool isPaused = false;
+  bool isAnimating = false, isPaused = false;
   double animationSpeed = 1.0;
   int currentStep = 0;
   Timer? _timer;
 
-  // Parámetros ajustables
-  int populationSize = 100;
+  int populationSize = 100, maxGenerations = 1000;
   double mutationRate = 0.01;
-  int maxGenerations = 1000;
 
-  void _showErrorMessage(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red),
-    );
-  }
+  final MapController _mapController = MapController();
 
-  Future<void> _runAlgorithm(BuildContext context) async {
-    final tspProvider = Provider.of<TSPProvider>(context, listen: false);
-    final nodes = tspProvider.nodes;
+  void _showError(String msg) => ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: Colors.red),
+      );
 
-    if (nodes.length < 2) {
-      _showErrorMessage(context, '¡Necesitas al menos 2 nodos!');
+  Future<void> _runAlgorithm() async {
+    final prov = context.read<TSPProvider>();
+    if (prov.nodes.length < 2) {
+      _showError('¡Necesitas al menos 2 nodos!');
       return;
     }
     if (selectedStartNode == null) {
-      _showErrorMessage(context, 'Selecciona un nodo de inicio.');
+      _showError('Selecciona un nodo de inicio.');
       return;
     }
 
+    // Ejecutar el algoritmo genético aquí
     final tsp = GeneticTSP(
-      nodes: nodes,
+      nodes: prov.nodes,
       populationSize: populationSize,
       mutationRate: mutationRate,
       maxGenerations: maxGenerations,
     );
     final route = await tsp.run();
 
-    final startIndex = route.indexWhere(
-      (node) => node.id == selectedStartNode!.id,
-    );
-    if (startIndex == -1) {
-      _showErrorMessage(
-        context,
-        'El nodo inicial no se encuentra en la ruta generada.',
-      );
+    final start = route.indexWhere((n) => n.id == selectedStartNode!.id);
+    if (start < 0) {
+      _showError('El nodo inicial no está en la ruta.');
       return;
     }
 
-    final reorderedRoute = [
-      ...route.sublist(startIndex),
-      ...route.sublist(0, startIndex),
-      route[startIndex], // cerrar ciclo
+    final reordered = [
+      ...route.sublist(start),
+      ...route.sublist(0, start),
+      route[start],
     ];
 
     setState(() {
-      fullRoute = reorderedRoute;
+      fullRoute = reordered;
       currentStep = 0;
-      totalDistance = tsp.totalDistanceForRoute(reorderedRoute);
+      // Calculamos la distancia total con el mismo tsp
+      totalDistance = tsp.totalDistanceForRoute(reordered);
       isAnimating = true;
       isPaused = false;
     });
-
     _startAnimation();
   }
 
@@ -114,28 +99,21 @@ class _HomeScreenState extends State<HomeScreen> {
     _timer?.cancel();
     _timer = Timer.periodic(
       Duration(milliseconds: (1000 ~/ animationSpeed).toInt()),
-      (timer) {
+      (t) {
         if (isPaused) return;
-
         setState(() {
           if (currentStep < fullRoute.length - 1) {
             currentStep++;
           } else {
-            timer.cancel();
             isAnimating = false;
+            t.cancel();
           }
         });
       },
     );
   }
 
-  void _pauseOrResumeAnimation() {
-    setState(() {
-      isPaused = !isPaused;
-    });
-  }
-
-  void _resetAnimation() {
+  void _reset() {
     _timer?.cancel();
     setState(() {
       isAnimating = false;
@@ -153,158 +131,89 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final tspProvider = Provider.of<TSPProvider>(context);
-    final nodes = tspProvider.nodes;
+  Widget build(BuildContext _) {
+    final prov = context.watch<TSPProvider>();
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('TSP con Algoritmo Genético'),
-        centerTitle: true,
-        actions: _buildModeButtons(context),
+        title: const Text('TSP Genético'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.clear_all),
+            tooltip: 'Limpiar todo',
+            onPressed: () => prov.clearAll(),
+          ),
+        ],
       ),
       body: Column(
         children: [
-          if (nodes.isNotEmpty)
+          if (prov.nodes.isNotEmpty)
             Padding(
               padding: const EdgeInsets.all(8),
               child: Row(
                 children: [
-                  const Text("Desde: "),
+                  const Text("Desde:"),
+                  const SizedBox(width: 8),
                   DropdownButton<Node>(
                     value: selectedStartNode,
-                    hint: const Text("Selecciona un nodo"),
-                    items:
-                        nodes.map((node) {
-                          return DropdownMenuItem<Node>(
-                            value: node,
-                            child: Text(node.name),
-                          );
-                        }).toList(),
-                    onChanged:
-                        isAnimating
-                            ? null
-                            : (Node? newNode) {
-                              setState(() {
-                                selectedStartNode = newNode;
-                              });
-                            },
+                    hint: const Text("—"),
+                    items: prov.nodes
+                        .map((n) => DropdownMenuItem(
+                              value: n,
+                              child: Text(n.name),
+                            ))
+                        .toList(),
+                    onChanged: isAnimating
+                        ? null
+                        : (n) => setState(() => selectedStartNode = n),
                   ),
                   const SizedBox(width: 16),
                   ElevatedButton(
-                    onPressed:
-                        (selectedStartNode == null || isAnimating)
-                            ? null
-                            : () => _runAlgorithm(context),
+                    onPressed: (selectedStartNode == null || isAnimating)
+                        ? null
+                        : _runAlgorithm,
                     child: const Text("Resolver TSP"),
                   ),
+                  if (isAnimating) ...[
+                    IconButton(
+                      icon: Icon(isPaused ? Icons.play_arrow : Icons.pause),
+                      onPressed: () =>
+                          setState(() => isPaused = !isPaused),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.stop),
+                      onPressed: _reset,
+                    ),
+                  ]
                 ],
               ),
             ),
 
-          // Parámetros ajustables UI
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  "Parámetros del algoritmo:",
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                _buildSlider(
+                  label: "Población",
+                  min: 10,
+                  max: 500,
+                  value: populationSize.toDouble(),
+                  onChanged: (v) => setState(() => populationSize = v.toInt()),
                 ),
-                const SizedBox(height: 8),
-
-                // Population Size
-                Row(
-                  children: [
-                    const Text("Tamaño población: "),
-                    Expanded(
-                      child: Slider(
-                        value: populationSize.toDouble(),
-                        min: 10,
-                        max: 500,
-                        divisions: 49,
-                        label: populationSize.toString(),
-                        onChanged:
-                            isAnimating
-                                ? null
-                                : (value) {
-                                  setState(() {
-                                    populationSize = value.toInt();
-                                  });
-                                },
-                      ),
-                    ),
-                    SizedBox(
-                      width: 50,
-                      child: Text(
-                        populationSize.toString(),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ],
+                _buildSlider(
+                  label: "Mutación",
+                  min: 0.0,
+                  max: 0.1,
+                  divisions: 100,
+                  value: mutationRate,
+                  onChanged: (v) => setState(() => mutationRate = v),
                 ),
-
-                // Mutation Rate
-                Row(
-                  children: [
-                    const Text("Tasa mutación: "),
-                    Expanded(
-                      child: Slider(
-                        value: mutationRate,
-                        min: 0.0,
-                        max: 0.1,
-                        divisions: 100,
-                        label: mutationRate.toStringAsFixed(3),
-                        onChanged:
-                            isAnimating
-                                ? null
-                                : (value) {
-                                  setState(() {
-                                    mutationRate = value;
-                                  });
-                                },
-                      ),
-                    ),
-                    SizedBox(
-                      width: 50,
-                      child: Text(
-                        mutationRate.toStringAsFixed(3),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ],
-                ),
-
-                // Max Generations
-                Row(
-                  children: [
-                    const Text("Máx. generaciones: "),
-                    Expanded(
-                      child: Slider(
-                        value: maxGenerations.toDouble(),
-                        min: 100,
-                        max: 10000,
-                        divisions: 99,
-                        label: maxGenerations.toString(),
-                        onChanged:
-                            isAnimating
-                                ? null
-                                : (value) {
-                                  setState(() {
-                                    maxGenerations = value.toInt();
-                                  });
-                                },
-                      ),
-                    ),
-                    SizedBox(
-                      width: 70,
-                      child: Text(
-                        maxGenerations.toString(),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ],
+                _buildSlider(
+                  label: "Generaciones",
+                  min: 100,
+                  max: 10000,
+                  value: maxGenerations.toDouble(),
+                  onChanged: (v) => setState(() => maxGenerations = v.toInt()),
                 ),
               ],
             ),
@@ -312,130 +221,140 @@ class _HomeScreenState extends State<HomeScreen> {
 
           if (totalDistance > 0)
             Padding(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.symmetric(vertical: 4),
               child: Text(
-                "Distancia total: ${totalDistance.toStringAsFixed(2)}",
+                "Distancia total: ${totalDistance.toStringAsFixed(0)} m",
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
 
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text("Velocidad: "),
-              Slider(
-                value: animationSpeed,
-                min: 0.5,
-                max: 5.0,
-                divisions: 9,
-                label: "${animationSpeed.toStringAsFixed(1)}x",
-                onChanged:
-                    isAnimating
-                        ? null
-                        : (value) {
-                          setState(() {
-                            animationSpeed = value;
-                          });
-                        },
-              ),
-              IconButton(
-                icon: Icon(isPaused ? Icons.play_arrow : Icons.pause),
-                onPressed: isAnimating ? _pauseOrResumeAnimation : null,
-              ),
-              IconButton(
-                icon: const Icon(Icons.stop),
-                onPressed: isAnimating ? _resetAnimation : null,
-              ),
-            ],
-          ),
-
           Expanded(
-            child: Stack(
+            child: FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                center: LatLng(-16.5, -68.15),
+                zoom: 13,
+                interactiveFlags: InteractiveFlag.all,
+                onTap: (_, p) {
+                  switch (prov.currentMode) {
+                    case AppMode.placingNodes:
+                      prov.addNode(Node(
+                        id: DateTime.now().millisecondsSinceEpoch.toString(),
+                        name: 'N${prov.nodes.length + 1}',
+                        x: p.latitude,
+                        y: p.longitude,
+                      ));
+                      break;
+                    case AppMode.deletingNodes:
+                      prov.deleteNearest(p);
+                      break;
+                    case AppMode.settingWeights:
+                      prov.handleNodeTap(
+                        Node(id: '', name: '', x: p.latitude, y: p.longitude),
+                        context,
+                      );
+                      break;
+                  }
+                },
+              ),
               children: [
-                CustomPaint(
-                  painter: RoutePainter(
-                    route: fullRoute,
-                    currentStep: currentStep,
-                    showDistances: true,
-                    useCurves: true,
-                  ),
-                  size: Size.infinite,
+                TileLayer(
+                  urlTemplate:
+                      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  subdomains: const ['a', 'b', 'c'],
                 ),
-                const NodeCreator(),
+
+                MarkerLayer(
+                  markers: prov.nodes.map((n) {
+                    final inRoute =
+                        fullRoute.take(currentStep + 1).contains(n);
+                    return Marker(
+                      point: LatLng(n.x, n.y),
+                      width: 40,
+                      height: 40,
+                      child: GestureDetector(
+                        onTap: () => prov.handleNodeTap(n, context),
+                        child: Icon(
+                          Icons.location_on,
+                          size: 30,
+                          color: inRoute ? Colors.green : Colors.red,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+
+                if (fullRoute.length > 1 && currentStep > 0)
+                  PolylineLayer(
+                    polylines: [
+                      Polyline(
+                        points: fullRoute
+                            .take(currentStep + 1)
+                            .map((n) => LatLng(n.x, n.y))
+                            .toList(),
+                        strokeWidth: 4,
+                        color: Colors.blueAccent,
+                      ),
+                    ],
+                  ),
               ],
             ),
           ),
 
-          _buildModeInstructions(context),
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _modeButton(Icons.add_location, AppMode.placingNodes),
+                const SizedBox(width: 16),
+                _modeButton(Icons.delete, AppMode.deletingNodes),
+                const SizedBox(width: 16),
+                _modeButton(Icons.line_weight, AppMode.settingWeights),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  List<Widget> _buildModeButtons(BuildContext context) {
-
-    return [
-      _buildModeButton(
-        context: context,
-        mode: AppMode.placingNodes,
-        icon: Icons.add_location_alt,
-        tooltip: 'Modo creación de nodos',
-      ),
-      _buildModeButton(
-        context: context,
-        mode: AppMode.deletingNodes,
-        icon: Icons.delete_forever,
-        tooltip: 'Modo eliminación de nodos',
-      ),
-      _buildModeButton(
-        context: context,
-        mode: AppMode.settingWeights,
-        icon: Icons.account_tree_outlined,
-        tooltip: 'Modo definición de distancias',
-      ),
-    ];
-  }
-
-  Widget _buildModeButton({
-    required BuildContext context,
-    required AppMode mode,
-    required IconData icon,
-    required String tooltip,
+  Widget _buildSlider({
+    required String label,
+    required double min,
+    required double max,
+    required double value,
+    int? divisions,
+    required ValueChanged<double> onChanged,
   }) {
-    final tspProvider = Provider.of<TSPProvider>(context);
-    return IconButton(
-      icon: Icon(
-        icon,
-        color: tspProvider.currentMode == mode ? Colors.amber : Colors.white,
-      ),
-      onPressed: () => tspProvider.setMode(mode),
-      tooltip: tooltip,
-    );
-  }
-
-  Widget _buildModeInstructions(BuildContext context) {
-    final tspProvider = Provider.of<TSPProvider>(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Text(
-        _getModeInstructions(tspProvider.currentMode),
-        style: TextStyle(
-          color: Colors.blue[800],
-          fontSize: 16,
-          fontStyle: FontStyle.italic,
+    return Row(
+      children: [
+        Text("$label:"),
+        Expanded(
+          child: Slider(
+            min: min,
+            max: max,
+            value: value,
+            divisions: divisions,
+            label: value.toStringAsFixed(divisions != null ? 0 : 3),
+            onChanged: isAnimating ? null : onChanged,
+          ),
         ),
-        textAlign: TextAlign.center,
-      ),
+        SizedBox(width: 50, child: Text(value.toStringAsFixed(0))),
+      ],
     );
   }
 
-  String _getModeInstructions(AppMode mode) {
-    switch (mode) {
-      case AppMode.placingNodes:
-        return 'Toca en cualquier lugar del área superior para añadir nodos';
-      case AppMode.deletingNodes:
-        return 'Toca sobre un nodo existente para eliminarlo';
-      case AppMode.settingWeights:
-        return 'Selecciona dos nodos consecutivos para establecer la distancia';
-    }
+  Widget _modeButton(IconData icon, AppMode mode) {
+    final prov = context.read<TSPProvider>();
+    final active = prov.currentMode == mode;
+    return IconButton(
+      icon: Icon(icon, color: active ? Colors.amber : Colors.white),
+      onPressed: () {
+        if (isAnimating) return;
+        prov.setMode(active ? AppMode.placingNodes : mode);
+        setState(() {});
+      },
+    );
   }
 }

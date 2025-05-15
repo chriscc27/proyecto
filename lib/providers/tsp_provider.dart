@@ -1,16 +1,19 @@
+// lib/providers/tsp_provider.dart
+
 import 'package:flutter/material.dart';
-import 'package:proyecto/algorithms/genetic_tsp.dart';
-import 'package:proyecto/models/distance.dart';
+import 'package:proyecto/models/distance.dart';  // Modelo de distancias manuales
 import 'package:proyecto/models/node.dart';
+import 'package:proyecto/algorithms/genetic_tsp.dart';
+import 'package:latlong2/latlong.dart' as ll;
 
 enum AppMode { placingNodes, deletingNodes, settingWeights }
 
 class TSPProvider with ChangeNotifier {
-  List<Node> _nodes = [];
-  List<Distance> _distances = [];
+  final List<Node> _nodes = [];
+  final List<Distance> _distances = [];
   List<Node>? _bestRoute;
   AppMode _currentMode = AppMode.placingNodes;
-  Node? _selectedNodeForWeight;
+  Node? _selectedForWeight;
 
   // Getters
   List<Node> get nodes => List.unmodifiable(_nodes);
@@ -18,124 +21,136 @@ class TSPProvider with ChangeNotifier {
   List<Node>? get bestRoute => _bestRoute;
   AppMode get currentMode => _currentMode;
 
-  // Cambiar modo y limpiar selección
+  // Cambiar de modo
   void setMode(AppMode mode) {
     _currentMode = mode;
-    _selectedNodeForWeight = null;
+    _selectedForWeight = null;
     notifyListeners();
   }
 
-  // Agregar nodo y notificar
+  // Agregar nodos
   void addNode(Node node) {
     _nodes.add(node);
     notifyListeners();
   }
 
-  // Borrar nodo y distancias relacionadas
+  // Borrar nodo específico
   void deleteNode(String id) {
-    _nodes.removeWhere((node) => node.id == id);
+    _nodes.removeWhere((n) => n.id == id);
     _distances.removeWhere((d) => d.fromNodeId == id || d.toNodeId == id);
     notifyListeners();
   }
 
-  // Agregar distancia si no existe y valor válido (>0)
-  void addDistance(Distance distance) {
-    if (distance.value <= 0) return; // evitar distancias inválidas
-
-    final exists = _distances.any((d) =>
-        d.fromNodeId == distance.fromNodeId && d.toNodeId == distance.toNodeId);
-
-    if (!exists) {
-      _distances.add(distance);
-      notifyListeners();
+  // Borrar nodo más cercano a cierta ubicación
+  void deleteNearest(ll.LatLng pt) {
+    if (_nodes.isEmpty) return;
+    final distCalc = ll.Distance();
+    int bestIdx = 0;
+    double bestD = double.infinity;
+    for (int i = 0; i < _nodes.length; i++) {
+      final d = distCalc.as(
+        ll.LengthUnit.Meter,
+        pt,
+        ll.LatLng(_nodes[i].x, _nodes[i].y),
+      );
+      if (d < bestD) {
+        bestD = d;
+        bestIdx = i;
+      }
     }
+    _nodes.removeAt(bestIdx);
+    notifyListeners();
   }
 
-  // Manejar taps en modo asignar peso
+  // Asignar pesos manualmente
   void handleNodeTap(Node node, BuildContext context) {
     if (_currentMode != AppMode.settingWeights) return;
-
-    if (_selectedNodeForWeight == null) {
-      _selectedNodeForWeight = node;
+    if (_selectedForWeight == null) {
+      _selectedForWeight = node;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Selecciona nodo destino para "${node.name}"')),
+        SnackBar(content: Text('Selecciona nodo destino para ${node.name}')),
       );
     } else {
-      if (_selectedNodeForWeight!.id == node.id) {
-        // No permitir seleccionar mismo nodo como destino
+      if (_selectedForWeight!.id == node.id) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No puedes seleccionar el mismo nodo')),
+          const SnackBar(content: Text('No puedes elegir el mismo nodo')),
         );
         return;
       }
-      _showDistanceDialog(context, _selectedNodeForWeight!, node);
-      _selectedNodeForWeight = null;
+      _askDistance(context, _selectedForWeight!, node);
+      _selectedForWeight = null;
     }
   }
 
-  // Diálogo para ingresar distancia
-  void _showDistanceDialog(BuildContext context, Node from, Node to) {
-    final TextEditingController controller = TextEditingController();
-
+  void _askDistance(BuildContext context, Node from, Node to) {
+    final ctrl = TextEditingController();
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (_) => AlertDialog(
         title: Text('Distancia ${from.name} → ${to.name}'),
         content: TextField(
-          controller: controller,
-          keyboardType:
-              const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            hintText: 'Distancia en unidades',
-            suffixText: 'u',
-          ),
+          controller: ctrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(hintText: 'metros'),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () {
-              final text = controller.text.trim();
-              if (text.isNotEmpty) {
-                final value = double.tryParse(text);
-                if (value == null || value <= 0) {
-                  // Mostrar error simple
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Ingrese un valor numérico positivo'),
-                    ),
-                  );
-                  return;
-                }
-                addDistance(Distance(
-                  fromNodeId: from.id,
-                  toNodeId: to.id,
-                  value: value,
-                ));
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('Guardar'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          TextButton(onPressed: () {
+            final v = double.tryParse(ctrl.text);
+            if (v == null || v <= 0) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Ingresa un número válido')),
+              );
+              return;
+            }
+            _distances.add(Distance(
+              fromNodeId: from.id,
+              toNodeId: to.id,
+              value: v,
+            ));
+            notifyListeners();
+            Navigator.pop(context);
+          }, child: const Text('Guardar')),
         ],
       ),
     );
   }
 
-  // Ejecutar algoritmo genético
-  Future<void> runGeneticAlgorithm() async {
-    if (_nodes.length < 2) {
-      throw Exception('Debe haber al menos 2 nodos para ejecutar el algoritmo');
-    }
+  // Limpiar todo
+  void clearAll() {
+    _nodes.clear();
+    _distances.clear();
+    _bestRoute = null;
+    notifyListeners();
+  }
 
-    try {
-      final genetic = GeneticTSP(nodes: _nodes);
-      _bestRoute = await genetic.run();
-      notifyListeners();
-    } catch (e) {
-      throw Exception('Error en algoritmo genético: $e');
+  // Distancia real en metros
+  double distanceBetween(Node a, Node b) {
+    return ll.Distance().as(
+      ll.LengthUnit.Meter,
+      ll.LatLng(a.x, a.y),
+      ll.LatLng(b.x, b.y),
+    );
+  }
+
+  
+
+  // Ejecutar algoritmo genético y guardar la mejor ruta
+  Future<void> runGeneticAlgorithm({
+    required int populationSize,
+    required double mutationRate,
+    required int maxGenerations,
+  }) async {
+    if (_nodes.length < 2) {
+      throw Exception('Al menos 2 nodos requeridos');
     }
+    final ga = GeneticTSP(
+      nodes: _nodes,
+      populationSize: populationSize,
+      mutationRate: mutationRate,
+      maxGenerations: maxGenerations,
+    );
+    _bestRoute = await ga.run();
+    notifyListeners();
   }
 }
