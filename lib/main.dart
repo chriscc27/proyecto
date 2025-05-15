@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'dart:async';
-
 import 'package:proyecto/providers/tsp_provider.dart';
 import 'package:proyecto/widgets/node_creator.dart';
 import 'package:proyecto/models/node.dart';
 import 'package:proyecto/algorithms/genetic_tsp.dart';
-import 'package:proyecto/widgets/route_painter.dart';
+import 'package:proyecto/widgets/route_painter.dart'; // Asegúrate que el RoutePainter está aquí o importado
 
 void main() {
   runApp(
@@ -57,9 +54,6 @@ class _HomeScreenState extends State<HomeScreen> {
   int populationSize = 100;
   double mutationRate = 0.01;
   int maxGenerations = 1000;
-
-  // Controlador del mapa para mover/centrar el mapa si quieres
-  final MapController _mapController = MapController();
 
   void _showErrorMessage(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -124,7 +118,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (isPaused) return;
 
         setState(() {
-          if (currentStep < fullRoute.length - 2) {
+          if (currentStep < fullRoute.length - 1) {
             currentStep++;
           } else {
             timer.cancel();
@@ -181,14 +175,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     value: selectedStartNode,
                     hint: const Text("Selecciona un nodo"),
                     items:
-                        nodes
-                            .map(
-                              (node) => DropdownMenuItem<Node>(
-                                value: node,
-                                child: Text(node.name),
-                              ),
-                            )
-                            .toList(),
+                        nodes.map((node) {
+                          return DropdownMenuItem<Node>(
+                            value: node,
+                            child: Text(node.name),
+                          );
+                        }).toList(),
                     onChanged:
                         isAnimating
                             ? null
@@ -216,7 +208,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   "Parámetros del algoritmo:",
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
@@ -359,144 +351,91 @@ class _HomeScreenState extends State<HomeScreen> {
           Expanded(
             child: Stack(
               children: [
-                FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    center: LatLng(-16.5, -68.15), // Centro en La Paz, Bolivia
-                    zoom: 13.0,
-                    maxZoom: 18,
-                    minZoom: 3,
-                    interactiveFlags: InteractiveFlag.all,
-                    onTap: (tapPosition, point) {
-                      final tspProvider = Provider.of<TSPProvider>(
-                        context,
-                        listen: false,
-                      );
-                      if (tspProvider.currentMode == AppMode.placingNodes) {
-                        final newId =
-                            DateTime.now().millisecondsSinceEpoch.toString();
-                        final newNode = Node(
-                          id: newId,
-                          name: 'Nodo ${tspProvider.nodes.length + 1}',
-                          x: point.latitude,
-                          y: point.longitude,
-                        );
-                        tspProvider.addNode(newNode);
-                      }
-                    },
+                CustomPaint(
+                  painter: RoutePainter(
+                    route: fullRoute,
+                    currentStep: currentStep,
+                    showDistances: true,
+                    useCurves: true,
                   ),
-                  children: [
-                    TileLayer(
-                      urlTemplate:
-                          'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      subdomains: const ['a', 'b', 'c'],
-                      userAgentPackageName: 'com.example.tsp_app',
-                    ),
-
-                    // MARKERS
-                    MarkerLayer(
-                      markers:
-                          tspProvider.nodes
-                              .map(
-                                (node) => Marker(
-                                  point: LatLng(node.x, node.y),
-                                  width: 40,
-                                  height: 40,
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      tspProvider.handleNodeTap(node, context);
-                                    },
-                                    child: Icon(
-                                      Icons.location_on,
-                                      color:
-                                          tspProvider.bestRoute?.contains(
-                                                    node,
-                                                  ) ==
-                                                  true
-                                              ? Colors.green
-                                              : Colors.red,
-                                      size: 30,
-                                    ),
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                    ),
-
-                    // Ruta animada con CustomPainter
-                    if (fullRoute.length > 1 && currentStep > 0)
-                      CustomPaint(
-                        painter: RoutePainter(
-                          route: fullRoute.sublist(0, currentStep + 1),
-                        ),
-                        child: Container(),
-                      ),
-                  ],
+                  size: Size.infinite,
                 ),
-
-                // Overlay botones modo y controles
-                if (tspProvider.currentMode == AppMode.placingNodes)
-                  Positioned(
-                    bottom: 80,
-                    left: 20,
-                    child: ElevatedButton(
-                      child: const Text('Salir modo agregar nodos'),
-                      onPressed: () => tspProvider.setMode(AppMode.none),
-                    ),
-                  ),
+                const NodeCreator(),
               ],
             ),
           ),
 
-          // Mensajes o información extra
-          Container(
-            padding: const EdgeInsets.all(8),
-            width: double.infinity,
-            color: Colors.grey[200],
-            child: Text(
-              'Modo actual: ${tspProvider.currentMode.name}\n'
-              'Nodos: ${nodes.length}',
-              textAlign: TextAlign.center,
-            ),
-          ),
+          _buildModeInstructions(context),
         ],
       ),
     );
   }
 
   List<Widget> _buildModeButtons(BuildContext context) {
-    final tspProvider = Provider.of<TSPProvider>(context, listen: false);
+
     return [
-      IconButton(
-        icon: const Icon(Icons.add_location_alt_outlined),
-        tooltip: 'Agregar nodos',
-        color:
-            tspProvider.currentMode == AppMode.placingNodes
-                ? Colors.white
-                : Colors.white70,
-        onPressed: () {
-          if (isAnimating) return;
-          if (tspProvider.currentMode == AppMode.placingNodes) {
-            tspProvider.setMode(AppMode.none);
-          } else {
-            tspProvider.setMode(AppMode.placingNodes);
-          }
-        },
+      _buildModeButton(
+        context: context,
+        mode: AppMode.placingNodes,
+        icon: Icons.add_location_alt,
+        tooltip: 'Modo creación de nodos',
       ),
-      IconButton(
-        icon: const Icon(Icons.clear),
-        tooltip: 'Limpiar nodos',
-        onPressed: () {
-          if (isAnimating) return;
-          
-          setState(() {
-            selectedStartNode = null;
-            fullRoute = [];
-            currentStep = 0;
-            totalDistance = 0;
-          });
-        },
+      _buildModeButton(
+        context: context,
+        mode: AppMode.deletingNodes,
+        icon: Icons.delete_forever,
+        tooltip: 'Modo eliminación de nodos',
+      ),
+      _buildModeButton(
+        context: context,
+        mode: AppMode.settingWeights,
+        icon: Icons.account_tree_outlined,
+        tooltip: 'Modo definición de distancias',
       ),
     ];
+  }
+
+  Widget _buildModeButton({
+    required BuildContext context,
+    required AppMode mode,
+    required IconData icon,
+    required String tooltip,
+  }) {
+    final tspProvider = Provider.of<TSPProvider>(context);
+    return IconButton(
+      icon: Icon(
+        icon,
+        color: tspProvider.currentMode == mode ? Colors.amber : Colors.white,
+      ),
+      onPressed: () => tspProvider.setMode(mode),
+      tooltip: tooltip,
+    );
+  }
+
+  Widget _buildModeInstructions(BuildContext context) {
+    final tspProvider = Provider.of<TSPProvider>(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Text(
+        _getModeInstructions(tspProvider.currentMode),
+        style: TextStyle(
+          color: Colors.blue[800],
+          fontSize: 16,
+          fontStyle: FontStyle.italic,
+        ),
+        textAlign: TextAlign.center,
+      ),
+    );
+  }
+
+  String _getModeInstructions(AppMode mode) {
+    switch (mode) {
+      case AppMode.placingNodes:
+        return 'Toca en cualquier lugar del área superior para añadir nodos';
+      case AppMode.deletingNodes:
+        return 'Toca sobre un nodo existente para eliminarlo';
+      case AppMode.settingWeights:
+        return 'Selecciona dos nodos consecutivos para establecer la distancia';
+    }
   }
 }

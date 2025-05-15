@@ -3,7 +3,7 @@ import 'package:proyecto/algorithms/genetic_tsp.dart';
 import 'package:proyecto/models/distance.dart';
 import 'package:proyecto/models/node.dart';
 
-enum AppMode { placingNodes, deletingNodes, settingWeights, none }
+enum AppMode { placingNodes, deletingNodes, settingWeights }
 
 class TSPProvider with ChangeNotifier {
   List<Node> _nodes = [];
