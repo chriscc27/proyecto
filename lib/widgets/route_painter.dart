@@ -7,26 +7,26 @@ class RoutePainter extends CustomPainter {
   final int currentStep;
   final bool showDistances;
   final bool useCurves;
+  final double curveLevel; // Nuevo parámetro
 
   RoutePainter({
     required this.route,
     this.currentStep = 0,
     this.showDistances = false,
     this.useCurves = false,
+    this.curveLevel = 40.0, // Valor por defecto para la curva
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paintLine =
-        Paint()
-          ..color = Colors.deepPurple
-          ..strokeWidth = 2
-          ..style = PaintingStyle.stroke;
+    final paintLine = Paint()
+      ..color = const Color.fromARGB(255, 52, 222, 77)
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
 
-    final paintNode =
-        Paint()
-          ..color = Colors.red
-          ..style = PaintingStyle.fill;
+    final paintNode = Paint()
+      ..color = Colors.red
+      ..style = PaintingStyle.fill;
 
     final textPainter = TextPainter(
       textAlign: TextAlign.center,
@@ -35,7 +35,6 @@ class RoutePainter extends CustomPainter {
 
     if (route.length < 2) return;
 
-    // Dibujar todas las aristas desde 0 hasta currentStep (no sólo una)
     final maxStep = currentStep.clamp(0, route.length - 2);
 
     for (int i = 0; i <= maxStep; i++) {
@@ -45,23 +44,23 @@ class RoutePainter extends CustomPainter {
       if (useCurves) {
         final midX = (p1.dx + p2.dx) / 2;
         final midY = (p1.dy + p2.dy) / 2;
+
         final dx = p2.dy - p1.dy;
         final dy = p1.dx - p2.dx;
         final length = sqrt(dx * dx + dy * dy);
         final normal = length == 0 ? Offset.zero : Offset(dx / length, dy / length);
 
-        final curveStrength = 100.0;
-        final controlPoint = Offset(midX, midY) + normal * curveStrength;
+        // Aquí usamos el curveLevel como fuerza de la curva
+        final controlPoint = Offset(midX, midY) + normal * curveLevel;
 
-        final path =
-            Path()
-              ..moveTo(p1.dx, p1.dy)
-              ..quadraticBezierTo(
-                controlPoint.dx,
-                controlPoint.dy,
-                p2.dx,
-                p2.dy,
-              );
+        final path = Path()
+          ..moveTo(p1.dx, p1.dy)
+          ..quadraticBezierTo(
+            controlPoint.dx,
+            controlPoint.dy,
+            p2.dx,
+            p2.dy,
+          );
         canvas.drawPath(path, paintLine);
       } else {
         canvas.drawLine(p1, p2, paintLine);
@@ -74,7 +73,7 @@ class RoutePainter extends CustomPainter {
         final textOffset = Offset((p1.dx + p2.dx) / 2, (p1.dy + p2.dy) / 2);
         textPainter.text = TextSpan(
           text: label,
-          style: const TextStyle(color: Colors.black, fontSize: 12),
+          style: const TextStyle(color: Colors.white, fontSize: 12),
         );
         textPainter.layout();
         textPainter.paint(
@@ -84,7 +83,6 @@ class RoutePainter extends CustomPainter {
       }
     }
 
-    // Finalmente dibujar los nodos que están en la ruta pintada
     for (int i = 0; i <= maxStep + 1 && i < route.length; i++) {
       final p = Offset(route[i].x, route[i].y);
       canvas.drawCircle(p, 8, paintNode);
@@ -96,6 +94,7 @@ class RoutePainter extends CustomPainter {
     return oldDelegate.route != route ||
         oldDelegate.currentStep != currentStep ||
         oldDelegate.showDistances != showDistances ||
-        oldDelegate.useCurves != useCurves;
+        oldDelegate.useCurves != useCurves ||
+        oldDelegate.curveLevel != curveLevel; // Incluimos la comparación aquí
   }
 }

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/node.dart';
-import '../models/distance.dart';
 import '../providers/tsp_provider.dart';
 
 class NodeCreator extends StatelessWidget {
@@ -23,16 +22,11 @@ class NodeCreator extends StatelessWidget {
               case AppMode.deletingNodes:
                 _handleDeleteNode(tspProvider, offset);
                 break;
-              case AppMode.settingWeights:
-                _handleSetWeight(context, tspProvider, offset);
-                break;
-              
             }
           },
           child: CustomPaint(
             painter: NodePainter(
               nodes: tspProvider.nodes,
-              distances: tspProvider.distances,
             ),
             size: Size.infinite,
           ),
@@ -68,7 +62,7 @@ class NodeCreator extends StatelessWidget {
             child: const Text('Cancelar'),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, nameController.text),
+            onPressed: () => Navigator.pop(context, nameController.text.trim()),
             child: const Text('Crear'),
           ),
         ],
@@ -93,17 +87,6 @@ class NodeCreator extends StatelessWidget {
     }
   }
 
-  void _handleSetWeight(
-    BuildContext context,
-    TSPProvider provider,
-    Offset offset,
-  ) {
-    final node = _findNodeAtPosition(provider.nodes, offset);
-    if (node != null) {
-      provider.handleNodeTap(node, context);
-    }
-  }
-
   Node? _findNodeAtPosition(
     List<Node> nodes,
     Offset position, {
@@ -121,20 +104,14 @@ class NodeCreator extends StatelessWidget {
 
 class NodePainter extends CustomPainter {
   final List<Node> nodes;
-  final List<Distance> distances;
 
-  NodePainter({required this.nodes, required this.distances});
+  NodePainter({required this.nodes});
 
   @override
   void paint(Canvas canvas, Size size) {
     final nodePaint = Paint()
-      ..color = Colors.red // Cambiado a rojo
+      ..color = Colors.red
       ..style = PaintingStyle.fill;
-
-    final linePaint = Paint()
-      ..color = Colors.grey
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke;
 
     final textStyle = const TextStyle(
       color: Colors.white,
@@ -148,69 +125,21 @@ class NodePainter extends CustomPainter {
       ],
     );
 
-    final weightStyle = const TextStyle(
-      color: Colors.black,
-      fontSize: 12,
-      fontWeight: FontWeight.bold,
-    );
-
     final textPainter = TextPainter(
       textDirection: TextDirection.ltr,
       textAlign: TextAlign.center,
     );
 
-    // Dibujar arcos curvos con pesos (sin cambios)
-    for (final d in distances) {
-      final from = nodes.where((n) => n.id == d.fromNodeId).cast<Node?>().firstOrNull;
-      final to = nodes.where((n) => n.id == d.toNodeId).cast<Node?>().firstOrNull;
-
-      if (from == null || to == null) return;
-
-      final fromOffset = Offset(from.x, from.y);
-      final toOffset = Offset(to.x, to.y);
-
-      final path = Path();
-      path.moveTo(fromOffset.dx, fromOffset.dy);
-
-      final controlPoint = Offset(
-        (fromOffset.dx + toOffset.dx) / 2,
-        (fromOffset.dy + toOffset.dy) / 2 - 40,
-      );
-
-      path.quadraticBezierTo(
-        controlPoint.dx,
-        controlPoint.dy,
-        toOffset.dx,
-        toOffset.dy,
-      );
-
-      canvas.drawPath(path, linePaint);
-
-      final midX = (fromOffset.dx + toOffset.dx) / 2;
-      final midY = (fromOffset.dy + toOffset.dy) / 2 - 40;
-
-      textPainter.text = TextSpan(
-        text: d.value.toStringAsFixed(1),
-        style: weightStyle,
-      );
-      textPainter.layout();
-      textPainter.paint(
-        canvas,
-        Offset(midX - textPainter.width / 2, midY - textPainter.height / 2),
-      );
-    }
-
-    // Dibujar nodos como marcadores tipo Google Maps rojos con círculo blanco central
     for (final node in nodes) {
       final nodeOffset = Offset(node.x, node.y);
       final markerPath = createMapMarkerPath(nodeOffset, 30, 40);
       canvas.drawPath(markerPath, nodePaint);
 
-      // Círculo interior blanco (centro del marcador)
+      // Círculo interior blanco
       final headPaint = Paint()..color = Colors.white;
       canvas.drawCircle(nodeOffset.translate(0, -12), 8, headPaint);
 
-      // Nombre del nodo arriba del marcador
+      // Nombre del nodo
       textPainter.text = TextSpan(text: node.name, style: textStyle);
       textPainter.layout();
       textPainter.paint(
@@ -230,34 +159,10 @@ class NodePainter extends CustomPainter {
     final topCurveControlRight = Offset(center.dx + width / 2, center.dy - height / 2);
 
     path.moveTo(bottomPoint.dx, bottomPoint.dy);
-
-    path.quadraticBezierTo(
-      center.dx,
-      center.dy + height / 4,
-      leftPoint.dx,
-      leftPoint.dy,
-    );
-
-    path.quadraticBezierTo(
-      topCurveControlLeft.dx,
-      topCurveControlLeft.dy,
-      center.dx,
-      center.dy - height / 2,
-    );
-
-    path.quadraticBezierTo(
-      topCurveControlRight.dx,
-      topCurveControlRight.dy,
-      rightPoint.dx,
-      rightPoint.dy,
-    );
-
-    path.quadraticBezierTo(
-      center.dx,
-      center.dy + height / 4,
-      bottomPoint.dx,
-      bottomPoint.dy,
-    );
+    path.quadraticBezierTo(center.dx, center.dy + height / 4, leftPoint.dx, leftPoint.dy);
+    path.quadraticBezierTo(topCurveControlLeft.dx, topCurveControlLeft.dy, center.dx, center.dy - height / 2);
+    path.quadraticBezierTo(topCurveControlRight.dx, topCurveControlRight.dy, rightPoint.dx, rightPoint.dy);
+    path.quadraticBezierTo(center.dx, center.dy + height / 4, bottomPoint.dx, bottomPoint.dy);
 
     path.close();
     return path;
