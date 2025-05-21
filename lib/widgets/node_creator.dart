@@ -1,229 +1,150 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:proyecto/widgets/route_painter.dart';
 import '../models/node.dart';
 import '../providers/tsp_provider.dart';
 
 class NodeCreator extends StatefulWidget {
-  const NodeCreator({super.key});
+  final Node? startNode;
+  const NodeCreator({super.key, this.startNode});
 
   @override
   State<NodeCreator> createState() => _NodeCreatorState();
 }
 
 class _NodeCreatorState extends State<NodeCreator> {
-  static const double curveLevel = 40.0;
-
-  Offset? _dragStartPosition;
-  String? _draggedEdgeKey; // Nueva variable para saber si se está arrastrando el punto de control
+  Node? draggingNode;
+  Offset? dragOffset;
 
   @override
   Widget build(BuildContext context) {
     final tspProvider = Provider.of<TSPProvider>(context);
     return GestureDetector(
-      onTapDown: (details) => _handleTap(tspProvider, details.localPosition),
-      onPanStart: (details) => _handlePanStart(tspProvider, details.localPosition),
-      onPanUpdate: (details) => _handlePanUpdate(tspProvider, details),
-      onPanEnd: (_) => _handlePanEnd(tspProvider),
+      onPanStart: (details) {
+        final RenderBox renderBox = context.findRenderObject() as RenderBox;
+        final localPos = renderBox.globalToLocal(details.globalPosition);
+
+        // Detectar si se toca un nodo existente
+        for (final node in tspProvider.nodes) {
+          if ((Offset(node.x, node.y) - localPos).distance < 25) {
+            setState(() {
+              draggingNode = node;
+              dragOffset = localPos - Offset(node.x, node.y);
+            });
+            tspProvider.selectNode(node);
+            return;
+          }
+        }
+      },
+      onPanUpdate: (details) {
+        if (draggingNode != null) {
+          final RenderBox renderBox = context.findRenderObject() as RenderBox;
+          final localPos = renderBox.globalToLocal(details.globalPosition);
+          final newPos = localPos - (dragOffset ?? Offset.zero);
+
+          // Actualiza la posición del nodo arrastrado
+          tspProvider.updateNodePosition(draggingNode!.id, newPos);
+        }
+      },
+      onPanEnd: (_) {
+        setState(() {
+          draggingNode = null;
+          dragOffset = null;
+        });
+      },
+      onTapUp: (details) async {
+        final tspProvider = Provider.of<TSPProvider>(context, listen: false);
+        final RenderBox renderBox = context.findRenderObject() as RenderBox;
+        final localPos = renderBox.globalToLocal(details.globalPosition);
+
+        // Si se toca un nodo existente
+        for (final node in tspProvider.nodes) {
+          if ((Offset(node.x, node.y) - localPos).distance < 25) {
+            if (tspProvider.currentMode == AppMode.deletingNodes) {
+              tspProvider.deleteNode(node.id);
+            } else {
+              tspProvider.selectNode(node);
+            }
+            return;
+          }
+        }
+
+        // Si no hay nodo cerca y el modo es añadir, crea uno nuevo (pide nombre)
+        if (tspProvider.currentMode == AppMode.placingNodes) {
+          final nameController = TextEditingController();
+          final name = await showDialog<String>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Nombre del nodo'),
+              content: TextField(
+                controller: nameController,
+                autofocus: true,
+                decoration: const InputDecoration(hintText: 'Ingrese nombre'),
+                onSubmitted: (value) {
+                  if (value.trim().isNotEmpty) {
+                    Navigator.pop(context, value.trim());
+                  }
+                },
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancelar'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, nameController.text.trim()),
+                  child: const Text('Crear'),
+                ),
+              ],
+            ),
+          );
+
+          if (name != null && name.isNotEmpty) {
+            final newNode = Node(
+              id: DateTime.now().millisecondsSinceEpoch.toString(),
+              name: name,
+              x: localPos.dx,
+              y: localPos.dy,
+            );
+            tspProvider.addNode(newNode);
+          }
+        }
+      },
       child: CustomPaint(
         painter: NodePainter(
           nodes: tspProvider.nodes,
           selectedNode: tspProvider.selectedNode,
+          startNode: widget.startNode, // <-- Aquí
         ),
         size: Size.infinite,
       ),
     );
-  }
-
-  void _handleTap(TSPProvider provider, Offset position) {
-    final node = _findNodeAtPosition(provider.nodes, position);
-
-    if (node != null) {
-      if (provider.currentMode == AppMode.deletingNodes) {
-        provider.deleteNode(node.id);
-      } else {
-        provider.selectNode(node);
-        provider.selectEdge(null);
-      }
-    } else {
-      if (provider.currentMode == AppMode.placingNodes) {
-        _showNodeNameDialog(context, provider, position);
-      } else {
-        _handleEdgeTap(provider, position);
-      }
-    }
-  }
-
-  Offset _calculateControlPoint(Offset p1, Offset p2, double curvature) {
-    final center = Offset((p1.dx + p2.dx) / 2, (p1.dy + p2.dy) / 2);
-    final normal = Offset(-(p2.dy - p1.dy), p2.dx - p1.dx).normalized();
-    return center + normal * curvature;
-  }
-
-  void _handleEdgeTap(TSPProvider provider, Offset position) {
-    const detectionRadius = 16.0; // Un poco más grande para el punto de control
-
-    for (int i = 0; i < provider.nodes.length - 1; i++) {
-      final start = provider.nodes[i];
-      final end = provider.nodes[i + 1];
-      final edgeKey = provider.getEdgeKey(start.id, end.id);
-
-      final p1 = Offset(start.x, start.y);
-      final p2 = Offset(end.x, end.y);
-      final curvature = provider.edgeCurvatures[edgeKey] ?? curveLevel;
-      final controlPoint = _calculateControlPoint(p1, p2, curvature);
-
-      // Detectar si se tocó el punto de control
-      if ((controlPoint - position).distance < detectionRadius) {
-        provider.selectEdge(edgeKey);
-        _draggedEdgeKey = edgeKey;
-        _dragStartPosition = position;
-        return;
-      }
-
-      // Detectar si se tocó la arista (opcional, para selección normal)
-      final path = Path()
-        ..moveTo(p1.dx, p1.dy)
-        ..quadraticBezierTo(controlPoint.dx, controlPoint.dy, p2.dx, p2.dy);
-
-      final metrics = path.computeMetrics();
-      for (final metric in metrics) {
-        final pos = metric.getTangentForOffset(metric.length * 0.5)?.position;
-        if (pos != null && (pos - position).distance < detectionRadius) {
-          provider.selectEdge(edgeKey);
-          _draggedEdgeKey = null;
-          return;
-        }
-      }
-    }
-    provider.selectEdge(null);
-    _draggedEdgeKey = null;
-  }
-
-  void _handlePanStart(TSPProvider provider, Offset position) {
-    _dragStartPosition = position;
-    final node = _findNodeAtPosition(provider.nodes, position);
-    if (node != null) {
-      provider.selectNode(node);
-      _draggedEdgeKey = null;
-    } else {
-      // Intentar seleccionar el punto de control de una arista
-      _handleEdgeTap(provider, position);
-    }
-  }
-
-  void _handlePanUpdate(TSPProvider provider, DragUpdateDetails details) {
-    if (_draggedEdgeKey != null) {
-      // Si estamos arrastrando el punto de control de una arista
-      final edgeKey = _draggedEdgeKey!;
-      final nodes = provider.nodes;
-      int idx = -1;
-      for (int i = 0; i < nodes.length - 1; i++) {
-        if (provider.getEdgeKey(nodes[i].id, nodes[i + 1].id) == edgeKey) {
-          idx = i;
-          break;
-        }
-      }
-      if (idx != -1) {
-        final start = nodes[idx];
-        final end = nodes[idx + 1];
-        final p1 = Offset(start.x, start.y);
-        final p2 = Offset(end.x, end.y);
-
-        // Calcular la nueva curvatura según la posición del drag
-        final center = Offset((p1.dx + p2.dx) / 2, (p1.dy + p2.dy) / 2);
-        final normal = Offset(-(p2.dy - p1.dy), p2.dx - p1.dx).normalized();
-        final dragOffset = details.localPosition - center;
-        final newCurvature = dragOffset.dx * normal.dx + dragOffset.dy * normal.dy;
-
-        provider.setEdgeCurvature(edgeKey, newCurvature);
-      }
-    } else if (provider.selectedNode != null) {
-      provider.updateNodePosition(
-        provider.selectedNode!.id,
-        details.localPosition,
-      );
-    }
-  }
-
-  void _handlePanEnd(TSPProvider provider) {
-    provider.deselectNode();
-    _draggedEdgeKey = null;
-  }
-
-  Node? _findNodeAtPosition(
-    List<Node> nodes,
-    Offset position, {
-    double tolerance = 20.0,
-  }) {
-    for (final node in nodes) {
-      final distance = (Offset(node.x, node.y) - position).distance;
-      if (distance <= tolerance) return node;
-    }
-    return null;
-  }
-
-  Future<void> _showNodeNameDialog(
-    BuildContext context,
-    TSPProvider provider,
-    Offset offset,
-  ) async {
-    final nameController = TextEditingController();
-
-    final name = await showDialog<String>(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Nombre del nodo'),
-            content: TextField(
-              controller: nameController,
-              autofocus: true,
-              decoration: const InputDecoration(hintText: 'Ingrese nombre'),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancelar'),
-              ),
-              TextButton(
-                onPressed:
-                    () => Navigator.pop(context, nameController.text.trim()),
-                child: const Text('Crear'),
-              ),
-            ],
-          ),
-    );
-
-    if (name != null && name.isNotEmpty) {
-      final newNode = Node(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        name: name,
-        x: offset.dx,
-        y: offset.dy,
-      );
-      provider.addNode(newNode);
-    }
   }
 }
 
 class NodePainter extends CustomPainter {
   final List<Node> nodes;
   final Node? selectedNode;
+  final Node? startNode; // <-- Agrega esto si quieres nodo de inicio en verde
 
-  NodePainter({required this.nodes, this.selectedNode});
+  NodePainter({
+    required this.nodes,
+    this.selectedNode,
+    this.startNode,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final nodePaint =
-        Paint()
-          ..color = Colors.red
-          ..style = PaintingStyle.fill;
+    final nodePaint = Paint()
+      ..color = Colors.red
+      ..style = PaintingStyle.fill;
 
-    final selectedPaint =
-        Paint()
-          ..color = Colors.blue
-          ..style = PaintingStyle.fill
-          ..strokeWidth = 3;
+    final selectedPaint = Paint()
+      ..color = Colors.blue
+      ..style = PaintingStyle.fill;
+
+    final startPaint = Paint()
+      ..color = Colors.green
+      ..style = PaintingStyle.fill;
 
     const textStyle = TextStyle(
       color: Colors.white,
@@ -239,16 +160,23 @@ class NodePainter extends CustomPainter {
     );
 
     for (final node in nodes) {
-      final isSelected = node == selectedNode;
       final offset = Offset(node.x, node.y);
 
-      // Dibujar marcador
+      // Decide el color del nodo
+      Paint paintToUse = nodePaint;
+      if (startNode != null && node.id == startNode!.id) {
+        paintToUse = startPaint;
+      } else if (selectedNode != null && node.id == selectedNode!.id) {
+        paintToUse = selectedPaint;
+      }
+
+      // Dibuja el marcador personalizado
       canvas.drawPath(
         createMapMarkerPath(offset, 30, 40),
-        isSelected ? selectedPaint : nodePaint,
+        paintToUse,
       );
 
-      // Círculo interior
+      // Círculo interior blanco
       canvas.drawCircle(
         offset.translate(0, -12),
         8,

@@ -83,6 +83,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _runAlgorithm(BuildContext context) async {
     final tspProvider = Provider.of<TSPProvider>(context, listen: false);
+
+    // Deselecciona todos los nodos
+    tspProvider.deselectNode();
+
+    // Selecciona el nodo de inicio
+    if (selectedStartNode != null) {
+      tspProvider.selectNode(selectedStartNode);
+    }
+
     final nodes = tspProvider.nodes;
 
     if (nodes.length < 2) {
@@ -344,7 +353,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final tspProvider = Provider.of<TSPProvider>(context);
     final nodes = tspProvider.nodes;
-    final edgeHandles = _getEdgeHandles(tspProvider);
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
@@ -478,66 +486,37 @@ class _HomeScreenState extends State<HomeScreen> {
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                return Stack(
-                  children: [
-                    GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onTapDown: (details) {
-                        if (tspProvider.currentMode == AppMode.movingNodes) {
-                          final box = context.findRenderObject() as RenderBox;
-                          final localPosition = box.globalToLocal(details.globalPosition);
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _calculateBoundaryMargin(constraints);
+                });
 
-                          final painter = RoutePainter(
-                            route: fullRoute,
-                            currentStep: currentStep,
-                            showDistances: true,
-                            useCurves: true,
-                            curveLevel: curveLevel,
-                            edgeCurvatures: tspProvider.edgeCurvatures,
-                            selectedEdgeKey: tspProvider.selectedEdgeKey,
-                            edgeHandles: edgeHandles,
-                          );
-                          final edgeKey = painter.hitTestEdge(localPosition, tolerance: 30);
-                          tspProvider.selectEdge(edgeKey);
-                        }
-                      },
-                      child: InteractiveViewer(
-                        transformationController: _transformationController,
-                        minScale: 1.0,
-                        maxScale: 5.0,
-                        panEnabled: true,
-                        boundaryMargin: const EdgeInsets.all(2000),
-                        child: SizedBox(
-                          width: 1080,
-                          height: 1920,
-                          child: Stack(
-                            children: [
-                              Image.asset(
-                                'assets/images/mapa.png',
-                                width: 1080,
-                                height: 1920,
-                                fit: BoxFit.cover,
-                              ),
-                              CustomPaint(
-                                painter: RoutePainter(
-                                  route: fullRoute,
-                                  currentStep: currentStep,
-                                  showDistances: true,
-                                  useCurves: true,
-                                  curveLevel: curveLevel,
-                                  edgeCurvatures: tspProvider.edgeCurvatures,
-                                  selectedEdgeKey: tspProvider.selectedEdgeKey,
-                                  edgeHandles: edgeHandles,
-                                ),
-                                size: Size.infinite,
-                              ),
-                              const NodeCreator(),
-                            ],
-                          ),
+                return InteractiveViewer(
+                  key: _interactiveViewerKey,
+                  minScale: 1.0,
+                  maxScale: 5.0,
+                  panEnabled: true,
+                  boundaryMargin: _boundaryMargin,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: Image.asset(
+                          'assets/images/mapa.png',
+                          fit: BoxFit.fill,
                         ),
                       ),
-                    ),
-                  ],
+                      CustomPaint(
+                        painter: RoutePainter(
+                          route: fullRoute,
+                          currentStep: currentStep,
+                          showDistances: true,
+                          useCurves: true,
+                          curveLevel: curveLevel,
+                        ),
+                        size: Size.infinite,
+                      ),
+                      NodeCreator(startNode: selectedStartNode),
+                    ],
+                  ),
                 );
               },
             ),
@@ -582,32 +561,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  List<EdgeHandle> _getEdgeHandles(TSPProvider tspProvider) {
-    List<EdgeHandle> handles = [];
-    for (int i = 0; i < fullRoute.length - 1; i++) {
-      final start = fullRoute[i];
-      final end = fullRoute[i + 1];
-      final edgeKey = tspProvider.getEdgeKey(start.id, end.id);
-      final curvature = tspProvider.edgeCurvatures[edgeKey] ?? curveLevel;
-
-      final p1 = Offset(start.x, start.y);
-      final p2 = Offset(end.x, end.y);
-      final controlPoint = _calculateControlPoint(p1, p2, curvature);
-      final handlePosition = Offset(
-        (p1.dx + p2.dx + controlPoint.dx) / 3,
-        (p1.dy + p2.dy + controlPoint.dy) / 3,
-      );
-
-      handles.add(EdgeHandle(edgeKey, handlePosition));
-    }
-    return handles;
-  }
-
-  Offset _calculateControlPoint(Offset p1, Offset p2, double curvature) {
-    final center = Offset((p1.dx + p2.dx) / 2, (p1.dy + p2.dy) / 2);
-    final normal = Offset(-(p2.dy - p1.dy), p2.dx - p1.dx).normalized();
-    return center + normal * curvature;
-  }
 
   Widget _buildParametersPanel(StateSetter setModalState) {
     return Column(
